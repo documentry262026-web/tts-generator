@@ -1,129 +1,105 @@
-import os
+import streamlit as st
 import asyncio
-import numpy as np
+import os
 import soundfile as sf
-import gradio as gr
+import numpy as np
 import edge_tts
 from kokoro_onnx import Kokoro
 
-# --- Helper: Download Kokoro Model Weights if missing ---
-def ensure_kokoro_files():
+st.set_page_config(page_title="Hindi TTS Studio", page_icon="🎙️", layout="centered")
+
+# Download Kokoro weights on the first run if needed
+@st.cache_resource
+def load_kokoro():
     onnx_file = "kokoro-v1.0.onnx"
     voices_file = "voices-v1.0.bin"
     if not os.path.exists(onnx_file):
         os.system("wget -q https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx")
     if not os.path.exists(voices_file):
         os.system("wget -q https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin")
+    return Kokoro(onnx_file, voices_file)
 
-# --- Generation Function ---
-async def generate_voice(text, engine, voice, speed):
-    if not text.strip():
-        return None, "Please enter some text."
+st.title("🎙️ Hindi TTS Studio")
+st.caption("Free, unlimited text-to-speech with zero character limits.")
 
-    output_path = "output_voiceover.wav"
-    
-    # 1. Edge-TTS Engine
-    if "Edge-TTS" in engine:
-        rate_str = f"{int((speed - 1.0) * 100):+d}%"
-        communicate = edge_tts.Communicate(text, voice, rate=rate_str)
-        mp3_path = "output_voiceover.mp3"
-        await communicate.save(mp3_path)
-        return mp3_path, "Generated successfully with Edge-TTS!"
+# UI Controls
+engine = st.radio(
+    "Choose Engine",
+    ["Edge-TTS (Ultra-Natural Studio Quality)", "Kokoro ONNX (Offline Neural)"],
+    horizontal=True
+)
 
-    # 2. Kokoro ONNX Engine (with Sentence Chunking for long scripts)
-    elif "Kokoro" in engine:
-        ensure_kokoro_files()
-        kokoro = Kokoro("kokoro-v1.0.onnx", "voices-v1.0.bin")
-        
-        # Split text into chunks using Hindi and English sentence terminators
-        delimiters = ["।", ".", "!", "?", "\n"]
-        sentences = [text]
-        for d in delimiters:
-            temp = []
-            for s in sentences:
-                temp.extend(s.split(d))
-            sentences = temp
-        
-        sentences = [s.strip() for s in sentences if s.strip()]
-        all_samples = []
-        sample_rate = 24000
-        
-        for segment in sentences:
-            try:
-                samples, sr = kokoro.create(segment, voice=voice, speed=speed, lang="hi")
-                all_samples.append(samples)
-                sample_rate = sr
-            except Exception as e:
-                continue
-                
-        if not all_samples:
-            return None, "Failed to generate audio. Check your text format."
-            
-        combined_audio = np.concatenate(all_samples)
-        sf.write(output_path, combined_audio, sample_rate)
-        return output_path, "Generated successfully with Kokoro!"
+if "Edge-TTS" in engine:
+    voice_map = {
+        "Hindi - Madhur (Deep Male)": "hi-IN-MadhurNeural",
+        "Hindi - Swara (Natural Female)": "hi-IN-SwaraNeural"
+    }
+else:
+    voice_map = {
+        "Hindi - Omega (Deep Male)": "hm_omega",
+        "Hindi - Psi (Male)": "hm_psi",
+        "Hindi - Alpha (Female)": "hf_alpha",
+        "Hindi - Beta (Female)": "hf_beta"
+    }
 
-# Wrapper for Gradio sync calls
-def run_tts(text, engine, voice, speed):
-    return asyncio.run(generate_voice(text, engine, voice, speed))
+selected_label = st.selectbox("Select Character / Voice", list(voice_map.keys()))
+voice_code = voice_map[selected_label]
 
-# Dynamic Voice Selector based on chosen Engine
-def update_voice_choices(engine):
-    if "Edge-TTS" in engine:
-        return gr.Dropdown(
-            choices=[
-                ("Hindi - Madhur (Deep Male)", "hi-IN-MadhurNeural"),
-                ("Hindi - Swara (Female)", "hi-IN-SwaraNeural")
-            ],
-            value="hi-IN-MadhurNeural",
-            label="Voice Character"
-        )
+speed = st.slider("Speaking Pace / Speed", min_value=0.5, max_value=1.5, value=1.0, step=0.05)
+
+script_text = st.text_area(
+    "Enter Your Hindi / Hinglish Script",
+    placeholder="यहाँ अपना पूरा वॉइसओवर स्क्रिप्ट पेस्ट करें (5-10 मिनट लंबा टेक्स्ट भी चलेगा)...",
+    height=220
+)
+
+# Generation Logic
+if st.button("Generate Voiceover", type="primary", use_container_width=True):
+    if not script_text.strip():
+        st.warning("Please enter some text first!")
     else:
-        return gr.Dropdown(
-            choices=[
-                ("Hindi - Omega (Deep Male)", "hm_omega"),
-                ("Hindi - Psi (Male)", "hm_psi"),
-                ("Hindi - Alpha (Female)", "hf_alpha"),
-                ("Hindi - Beta (Female)", "hf_beta")
-            ],
-            value="hm_omega",
-            label="Voice Character"
-        )
+        with st.spinner("Generating audio, please wait..."):
+            try:
+                if "Edge-TTS" in engine:
+                    rate_str = f"{int((speed - 1.0) * 100):+d}%"
+                    communicate = edge_tts.Communicate(script_text, voice_code, rate=rate_str)
+                    output_file = "voiceover.mp3"
+                    asyncio.run(communicate.save(output_file))
+                    
+                    st.success("Generated successfully!")
+                    st.audio(output_file, format="audio/mp3")
+                    with open(output_file, "rb") as f:
+                        st.download_button("⬇️ Download Audio (MP3)", f, file_name="hindi_voiceover.mp3", mime="audio/mp3", use_container_width=True)
 
-# --- Gradio UI Layout ---
-with gr.Blocks(title="Free Hindi TTS Studio") as demo:
-    gr.Markdown("# 🎙️ Free Unlimited Hindi Voiceover Studio")
-    gr.Markdown("Zero limits, no character caps. Designed for long documentaries, stories, and videos.")
-    
-    with gr.Row():
-        with gr.Column():
-            text_input = gr.Textbox(
-                label="Your Script (Hindi / Hinglish)",
-                placeholder="यहाँ अपना पूरा वॉइसओवर स्क्रिप्ट पेस्ट करें (5 से 10 मिनट लंबा टेक्स्ट भी चलेगा)...",
-                lines=10
-            )
-            engine_selector = gr.Radio(
-                choices=["Edge-TTS (Ultra-Natural Studio Quality)", "Kokoro ONNX (Offline Local Neural)"],
-                value="Edge-TTS (Ultra-Natural Studio Quality)",
-                label="TTS Engine"
-            )
-            voice_selector = gr.Dropdown(
-                choices=[
-                    ("Hindi - Madhur (Deep Male)", "hi-IN-MadhurNeural"),
-                    ("Hindi - Swara (Female)", "hi-IN-SwaraNeural")
-                ],
-                value="hi-IN-MadhurNeural",
-                label="Voice Character"
-            )
-            speed_slider = gr.Slider(minimum=0.5, maximum=1.5, value=1.0, step=0.05, label="Speaking Speed / Pace")
-            generate_btn = gr.Button("Generate Full Voiceover", variant="primary")
-            
-        with gr.Column():
-            audio_output = gr.Audio(label="Audio Player & Download", type="filepath")
-            status_output = gr.Textbox(label="Status", interactive=False)
-            
-    engine_selector.change(fn=update_voice_choices, inputs=engine_selector, outputs=voice_selector)
-    generate_btn.click(fn=run_tts, inputs=[text_input, engine_selector, voice_selector, speed_slider], outputs=[audio_output, status_output])
+                else:
+                    kokoro = load_kokoro()
+                    # Chunk long text by sentence terminators
+                    delimiters = ["।", ".", "!", "?", "\n"]
+                    sentences = [script_text]
+                    for d in delimiters:
+                        temp = []
+                        for s in sentences:
+                            temp.extend(s.split(d))
+                        sentences = temp
+                    sentences = [s.strip() for s in sentences if s.strip()]
 
-if __name__ == "__main__":
-    demo.launch()
+                    all_audio = []
+                    sr = 24000
+                    for seg in sentences:
+                        samples, sr = kokoro.create(seg, voice=voice_code, speed=speed, lang="hi")
+                        all_audio.append(samples)
+
+                    if all_audio:
+                        final_audio = np.concatenate(all_audio)
+                        output_file = "voiceover.wav"
+                        sf.write(output_file, final_audio, sr)
+                        
+                        st.success("Generated successfully!")
+                        st.audio(output_file, format="audio/wav")
+                        with open(output_file, "rb") as f:
+                            st.download_button("⬇️ Download Audio (WAV)", f, file_name="hindi_voiceover.wav", mime="audio/wav", use_container_width=True)
+                    else:
+                        st.error("Could not process sentences. Please check script formatting.")
+
+            except Exception as e:
+                st.error(f"Error during generation: {e}")
