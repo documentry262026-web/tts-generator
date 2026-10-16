@@ -1,79 +1,76 @@
 import streamlit as st
-import asyncio
 import os
+import subprocess
 import soundfile as sf
 import numpy as np
-import edge_tts
 from kokoro_onnx import Kokoro
 
-st.set_page_config(page_title="Hindi TTS Studio", page_icon="🎙️", layout="centered")
+st.set_page_config(page_title="Piper & Kokoro TTS Studio", page_icon="🎙️", layout="centered")
 
-# Download Kokoro weights on the first run if needed
+# --- ऑटो डाउनलोड मॉडल्स (Cached) ---
 @st.cache_resource
-def load_kokoro():
-    onnx_file = "kokoro-v1.0.onnx"
-    voices_file = "voices-v1.0.bin"
-    if not os.path.exists(onnx_file):
-        os.system("wget -q https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx")
-    if not os.path.exists(voices_file):
-        os.system("wget -q https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin")
-    return Kokoro(onnx_file, voices_file)
+def setup_models():
+    # 1. Kokoro Models
+    if not os.path.exists("kokoro-v1.0.onnx"):
+        os.system("wget -q -nc https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx")
+    if not os.path.exists("voices-v1.0.bin"):
+        os.system("wget -q -nc https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin")
+    
+    # 2. Piper Models (Hindi Rohan + Urdu/Hindi Fasih Deep Male)
+    if not os.path.exists("rohan.onnx"):
+        os.system("wget -q -nc -O rohan.onnx https://huggingface.co/rhasspy/piper-voices/resolve/main/hi/hi_IN/rohan/medium/hi_IN-rohan-medium.onnx")
+        os.system("wget -q -nc -O rohan.onnx.json https://huggingface.co/rhasspy/piper-voices/resolve/main/hi/hi_IN/rohan/medium/hi_IN-rohan-medium.onnx.json")
+    if not os.path.exists("fasih.onnx"):
+        os.system("wget -q -nc -O fasih.onnx https://huggingface.co/IhorShevchuk/piper-voice-ur-fasih/resolve/main/ur_PK-male-medium.onnx")
+        os.system("wget -q -nc -O fasih.onnx.json https://huggingface.co/IhorShevchuk/piper-voice-ur-fasih/resolve/main/ur_PK-male-medium.onnx.json")
 
-st.title("🎙️ Hindi TTS Studio")
-st.caption("Free, unlimited text-to-speech with zero character limits.")
+    return Kokoro("kokoro-v1.0.onnx", "voices-v1.0.bin")
 
-# UI Controls
-engine = st.radio(
-    "Choose Engine",
-    ["Edge-TTS (Ultra-Natural Studio Quality)", "Kokoro ONNX (Offline Neural)"],
-    horizontal=True
-)
+kokoro_engine = setup_models()
 
-if "Edge-TTS" in engine:
-    voice_map = {
-        "Hindi - Madhur (Deep Male)": "hi-IN-MadhurNeural",
-        "Hindi - Swara (Natural Female)": "hi-IN-SwaraNeural"
+st.title("🎙️ Local Neural TTS Studio")
+st.caption("100% Free & Unlimited | Powered by Piper TTS & Kokoro ONNX")
+
+# Engine चुनना
+engine = st.radio("Choose Model Engine", ["Kokoro ONNX (Natural Flow)", "Piper TTS (Fast & Deep Voice)"], horizontal=True)
+
+# वॉइस कैरेक्टर्स
+if "Kokoro" in engine:
+    voice_options = {
+        "Hindi - Omega (गहरी आवाज़ / Deep Male)": "hm_omega",
+        "Hindi - Psi (शांत आवाज़ / Calm Male)": "hm_psi",
+        "Hindi - Alpha (फीमेल नैरेटर / Female 1)": "hf_alpha",
+        "Hindi - Beta (एक्सप्रेसिव फीमेल / Female 2)": "hf_beta"
     }
 else:
-    voice_map = {
-        "Hindi - Omega (Deep Male)": "hm_omega",
-        "Hindi - Psi (Male)": "hm_psi",
-        "Hindi - Alpha (Female)": "hf_alpha",
-        "Hindi - Beta (Female)": "hf_beta"
+    voice_options = {
+        "Hindi - Rohan (डॉक्यूमेंट्री मेल / Documentary Male)": "rohan.onnx",
+        "Hindi/Urdu - Fasih (अल्ट्रा डीप मेल / Ultra Deep Male)": "fasih.onnx"
     }
 
-selected_label = st.selectbox("Select Character / Voice", list(voice_map.keys()))
-voice_code = voice_map[selected_label]
+selected_voice = st.selectbox("Select Character / Voice", list(voice_options.keys()))
+voice_code = voice_options[selected_voice]
 
-speed = st.slider("Speaking Pace / Speed", min_value=0.5, max_value=1.5, value=1.0, step=0.05)
+speed = st.slider("Speaking Speed (Pace)", min_value=0.5, max_value=1.5, value=1.0, step=0.05)
 
 script_text = st.text_area(
     "Enter Your Hindi / Hinglish Script",
-    placeholder="यहाँ अपना पूरा वॉइसओवर स्क्रिप्ट पेस्ट करें (5-10 मिनट लंबा टेक्स्ट भी चलेगा)...",
-    height=220
+    placeholder="यहाँ अपनी पूरी 5-10 मिनट की स्क्रिप्ट पेस्ट करें...",
+    height=240
 )
 
-# Generation Logic
+# जनरेशन बटन
 if st.button("Generate Voiceover", type="primary", use_container_width=True):
     if not script_text.strip():
-        st.warning("Please enter some text first!")
+        st.warning("कृपया पहले कोई टेक्स्ट दर्ज करें!")
     else:
-        with st.spinner("Generating audio, please wait..."):
+        with st.spinner("वॉइसओवर तैयार हो रहा है... कृपया प्रतीक्षा करें..."):
             try:
-                if "Edge-TTS" in engine:
-                    rate_str = f"{int((speed - 1.0) * 100):+d}%"
-                    communicate = edge_tts.Communicate(script_text, voice_code, rate=rate_str)
-                    output_file = "voiceover.mp3"
-                    asyncio.run(communicate.save(output_file))
-                    
-                    st.success("Generated successfully!")
-                    st.audio(output_file, format="audio/mp3")
-                    with open(output_file, "rb") as f:
-                        st.download_button("⬇️ Download Audio (MP3)", f, file_name="hindi_voiceover.mp3", mime="audio/mp3", use_container_width=True)
+                output_file = "voiceover_output.wav"
 
-                else:
-                    kokoro = load_kokoro()
-                    # Chunk long text by sentence terminators
+                # 1. KOKORO ONNX PROCESSING
+                if "Kokoro" in engine:
+                    # लम्बी स्क्रिप्ट के लिए सेंटेंस चंकिंग
                     delimiters = ["।", ".", "!", "?", "\n"]
                     sentences = [script_text]
                     for d in delimiters:
@@ -86,20 +83,39 @@ if st.button("Generate Voiceover", type="primary", use_container_width=True):
                     all_audio = []
                     sr = 24000
                     for seg in sentences:
-                        samples, sr = kokoro.create(seg, voice=voice_code, speed=speed, lang="hi")
+                        samples, sr = kokoro_engine.create(seg, voice=voice_code, speed=speed, lang="hi")
                         all_audio.append(samples)
 
                     if all_audio:
                         final_audio = np.concatenate(all_audio)
-                        output_file = "voiceover.wav"
                         sf.write(output_file, final_audio, sr)
-                        
-                        st.success("Generated successfully!")
-                        st.audio(output_file, format="audio/wav")
-                        with open(output_file, "rb") as f:
-                            st.download_button("⬇️ Download Audio (WAV)", f, file_name="hindi_voiceover.wav", mime="audio/wav", use_container_width=True)
                     else:
-                        st.error("Could not process sentences. Please check script formatting.")
+                        st.error("टेक्स्ट प्रोसेस नहीं हो सका!")
+
+                # 2. PIPER TTS PROCESSING
+                else:
+                    # Piper में speed को length_scale से सेट किया जाता है (1.0 = नॉर्मल, >1.0 धीमा/गहरा)
+                    length_scale = round(1.0 / speed, 2)
+                    cmd = [
+                        "piper",
+                        "--model", voice_code,
+                        "--output_file", output_file,
+                        "--length_scale", str(length_scale)
+                    ]
+                    process = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    process.communicate(input=script_text.encode("utf-8"))
+
+                # ऑडियो प्लेयर और डाउनलोड
+                st.success("वॉइसओवर सफलतापूर्वक तैयार हो गया!")
+                st.audio(output_file, format="audio/wav")
+                with open(output_file, "rb") as f:
+                    st.download_button(
+                        "⬇️ Download Audio (WAV)",
+                        f,
+                        file_name="voiceover.wav",
+                        mime="audio/wav",
+                        use_container_width=True
+                    )
 
             except Exception as e:
-                st.error(f"Error during generation: {e}")
+                st.error(f"एरर आया: {e}")
