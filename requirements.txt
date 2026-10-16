@@ -1,5 +1,5 @@
 streamlit
-edge-tts
+piper-tts
 kokoro-onnx
 soundfile
 numpy
