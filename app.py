@@ -155,7 +155,7 @@ st.markdown("""
 with st.container():
     st.markdown('<div class="glass-panel"></div>', unsafe_allow_html=True)
 
-    # 1. Preset Style Selector (Auto sets Engine, Voice, and Speed)
+    # 1. Preset Style Selector
     style_preset = st.selectbox(
         "🎬 Content Narration Style (Auto-Adjusts Pace & Character)",
         [
@@ -167,7 +167,6 @@ with st.container():
         ]
     )
 
-    # Auto settings dictionary
     if "Documentary" in style_preset:
         default_engine_idx = 0
         default_speed = 0.88
@@ -211,7 +210,7 @@ with st.container():
         selected_voice = st.selectbox("Voice Persona", list(voice_options.keys()))
         voice_code = voice_options[selected_voice]
 
-    # Speed Slider (Auto-updated by preset)
+    # Speed Slider
     speed = st.slider("Speaking Pace / Speed", min_value=0.5, max_value=1.5, value=default_speed, step=0.05)
 
     # Script Input Area
@@ -230,7 +229,8 @@ if generate_btn:
     else:
         with st.spinner("वॉइसओवर तैयार हो रहा है... कृपया कुछ सेकंड प्रतीक्षा करें..."):
             try:
-                output_file = "voiceover_output.wav"
+                wav_file = "voiceover_temp.wav"
+                mp3_file = "voiceover_output.mp3"
 
                 # 1. KOKORO ENGINE (Chunking for long scripts)
                 if "Kokoro" in engine:
@@ -251,7 +251,7 @@ if generate_btn:
 
                     if all_audio:
                         final_audio = np.concatenate(all_audio)
-                        sf.write(output_file, final_audio, sr)
+                        sf.write(wav_file, final_audio, sr)
                     else:
                         st.error("Text normalize नहीं हो सका!")
 
@@ -261,31 +261,32 @@ if generate_btn:
                     cmd = [
                         "piper",
                         "--model", voice_code,
-                        "--output_file", output_file,
+                        "--output_file", wav_file,
                         "--length_scale", str(length_scale)
                     ]
                     process = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                     process.communicate(input=script_text.encode("utf-8"))
 
-            # --- AUTO CONVERT WAV TO LIGHTWEIGHT MP3 ---
-                from pydub import AudioSegment
-                
-                mp3_output = "voiceover_output.mp3"
-                sound = AudioSegment.from_wav(output_file)
-                sound.export(mp3_output, format="mp3", bitrate="192k")
+                # 3. DIRECT FFMPEG CONVERSION TO MP3 (Zero Python Library Conflicts)
+                conv_cmd = [
+                    "ffmpeg", "-y",
+                    "-i", wav_file,
+                    "-codec:a", "libmp3lame",
+                    "-b:a", "192k",
+                    mp3_file
+                ]
+                subprocess.run(conv_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
 
-                # --- OUTPUT PANEL (GLASSMORPHISM STYLE) ---
+                # Output Panel
                 st.markdown("""
                 <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 16px; padding: 16px; margin-top: 20px;">
                     <div style="font-size: 14px; font-weight: 600; color: #34d399; margin-bottom: 4px;">✓ Voiceover Generated & Converted to MP3 (Lightweight)</div>
                 </div>
                 """, unsafe_allow_html=True)
 
-                # MP3 Audio Player
-                st.audio(mp3_output, format="audio/mp3")
+                st.audio(mp3_file, format="audio/mp3")
 
-                # MP3 Download Button
-                with open(mp3_output, "rb") as f:
+                with open(mp3_file, "rb") as f:
                     st.download_button(
                         label="⬇️ Download Voiceover (Lightweight MP3)",
                         data=f,
@@ -295,5 +296,4 @@ if generate_btn:
                     )
 
             except Exception as e:
-                st.error(f"एरर आया: {e}")
                 st.error(f"एरर आया: {e}")
