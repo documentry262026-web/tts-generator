@@ -267,23 +267,33 @@ if generate_btn:
                     process = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                     process.communicate(input=script_text.encode("utf-8"))
 
-                # Output Panel
+            # --- AUTO CONVERT WAV TO LIGHTWEIGHT MP3 ---
+                from pydub import AudioSegment
+                
+                mp3_output = "voiceover_output.mp3"
+                sound = AudioSegment.from_wav(output_file)
+                sound.export(mp3_output, format="mp3", bitrate="192k")
+
+                # --- OUTPUT PANEL (GLASSMORPHISM STYLE) ---
                 st.markdown("""
                 <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 16px; padding: 16px; margin-top: 20px;">
-                    <div style="font-size: 14px; font-weight: 600; color: #34d399; margin-bottom: 4px;">✓ Voiceover Generated Successfully</div>
+                    <div style="font-size: 14px; font-weight: 600; color: #34d399; margin-bottom: 4px;">✓ Voiceover Generated & Converted to MP3 (Lightweight)</div>
                 </div>
                 """, unsafe_allow_html=True)
 
-                st.audio(output_file, format="audio/wav")
+                # MP3 Audio Player
+                st.audio(mp3_output, format="audio/mp3")
 
-                with open(output_file, "rb") as f:
+                # MP3 Download Button
+                with open(mp3_output, "rb") as f:
                     st.download_button(
-                        label="⬇️ Download Voiceover (WAV)",
+                        label="⬇️ Download Voiceover (Lightweight MP3)",
                         data=f,
-                        file_name="voiceover.wav",
-                        mime="audio/wav",
+                        file_name="voiceover.mp3",
+                        mime="audio/mp3",
                         use_container_width=True
                     )
 
             except Exception as e:
+                st.error(f"एरर आया: {e}")
                 st.error(f"एरर आया: {e}")
